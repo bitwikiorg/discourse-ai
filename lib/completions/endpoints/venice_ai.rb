@@ -9,11 +9,17 @@ module DiscourseAi
         end
 
         def normalize_model_params(model_params)
-          model_params # No transformation; Venice expects exact fields
+          # Leave values unchanged — Venice expects certain raw fields
+          model_params
         end
 
         def default_options
-          {} # No defaults, only send exactly what Venice expects
+          {
+            model: llm_model.name,
+            stream: true,
+            temperature: 0.7,
+            user: "discourse"
+          }
         end
 
         def provider_id
@@ -37,49 +43,32 @@ module DiscourseAi
         private
 
         def model_uri
-          @uri ||= URI.join(llm_model.url, "/api/v1/chat/completions")
+          URI.join(llm_model.url, "/api/v1/chat/completions")
         end
 
-        def prepare_payload(prompt, _model_params, _dialect)
+        def prepare_payload(prompt, model_params, _dialect)
           messages = prompt.respond_to?(:messages) ? prompt.messages : prompt
 
-          {
-            frequency_penalty: 0,
-            max_completion_tokens: 123,
-            max_temp: 1.5,
-            max_tokens: 123,
-            messages: messages.map { |m| { content: m[:content].to_s, role: m[:role].to_s } },
-            min_p: 0.05,
-            min_temp: 0.1,
-            model: llm_model.name,
-            n: 1,
-            presence_penalty: 0,
-            repetition_penalty: 1.2,
-            seed: 42,
-            stop: "<string>",
-            stop_token_ids: [151643, 151645],
-            stream: true,
-            stream_options: { include_usage: true },
-            temperature: 0.7,
-            top_k: 40,
-            top_p: 0.9,
-            user: "discourse",
-            venice_parameters: {
-              character_slug: "venice",
-              enable_web_search: "auto",
-              include_venice_system_prompt: true
-            },
-            
+          formatted_messages = messages.map do |m|
+            {
+              "role" => m[:role].to_s,
+              "content" => m[:content].to_s
+            }
+          end
+
+          payload = default_options.merge(model_params).merge("messages" => formatted_messages)
+
+          payload
         end
 
         def prepare_request(payload)
           headers = {
-            "Content-Type" => "application/json",
-            "Authorization" => "Bearer #{llm_model.api_key}"
+            "Authorization" => "Bearer #{llm_model.api_key}",
+            "Content-Type" => "application/json"
           }
 
           Net::HTTP::Post.new(model_uri, headers).tap do |r|
-            r.body = JSON.generate(payload) # Clean serialization, avoid Rails `.to_json`
+            r.body = JSON.generate(payload)
           end
         end
 
@@ -89,9 +78,9 @@ module DiscourseAi
 
         def decode_chunk(chunk)
           @decoder ||= JsonStreamDecoder.new
-          elements = (@decoder << chunk).map do |parsed_json|
-            processor.process_streamed_message(parsed_json)
-          end.flatten.compact
+          elements = (@decoder << chunk)
+                      .map { |parsed_json| processor.process_streamed_message(parsed_json) }
+                      .flatten.compact
 
           seen_tools = Set.new
           elements.select { |item| !item.is_a?(ToolCall) || seen_tools.add?(item) }
