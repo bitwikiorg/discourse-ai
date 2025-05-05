@@ -93,7 +93,7 @@ module DiscourseAi
             {
               role: msg[:role].to_s,
               content: msg[:content].to_s
-            }.compact
+            }
           end
 
           payload = default_options.merge(model_params).merge(messages: formatted_messages)
@@ -108,7 +108,7 @@ module DiscourseAi
                 },
                 id: tool[:id] || "tool_#{SecureRandom.hex(4)}",
                 type: tool[:type] || "function"
-              }.compact
+              }
             end
 
             if dialect.tool_choice.present?
@@ -126,7 +126,7 @@ module DiscourseAi
             end
           end
 
-          payload.compact
+          deep_compact(payload)
         end
 
         def prepare_request(payload)
@@ -137,12 +137,6 @@ module DiscourseAi
 
           request = Net::HTTP::Post.new(model_uri, headers)
           request.body = payload.to_json
-
-          # Optional debug output — comment this in production
-          if ENV["DISCOURSE_DEV"] == "1"
-            puts "[Venice Payload] #{JSON.pretty_generate(payload)}"
-          end
-
           request
         end
 
@@ -172,6 +166,21 @@ module DiscourseAi
 
         def processor
           @processor ||= OpenAiMessageProcessor.new(partial_tool_calls: partial_tool_calls)
+        end
+
+        # 🧼 Deeply remove nil values from all levels of the hash
+        def deep_compact(obj)
+          case obj
+          when Hash
+            obj.each_with_object({}) do |(k, v), h|
+              compacted = deep_compact(v)
+              h[k] = compacted unless compacted.nil?
+            end
+          when Array
+            obj.map { |e| deep_compact(e) }.compact
+          else
+            obj
+          end
         end
       end
     end
