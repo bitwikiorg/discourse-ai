@@ -11,7 +11,6 @@ module DiscourseAi
         def normalize_model_params(model_params)
           model_params = model_params.dup
 
-          # Translate OpenAI-style keys to Venice-style keys
           if max_tokens = model_params.delete(:max_tokens)
             model_params[:max_completion_tokens] = max_tokens
           end
@@ -29,7 +28,10 @@ module DiscourseAi
 
         def default_options
           {
-            model: llm_model.name # ensure "model" is always present in request
+            model: llm_model.name,
+            stream: true,
+            n: 1,
+            user: "discourse"
           }
         end
 
@@ -60,9 +62,20 @@ module DiscourseAi
         end
 
         def prepare_payload(prompt, model_params, dialect)
-          # Use prompt.messages (raw content) instead of .to_openai, since Venice may not expect OpenAI-style
-          formatted_messages =
-            prompt.respond_to?(:messages) ? prompt.messages : prompt
+          messages =
+            if prompt.respond_to?(:to_openai)
+              prompt.to_openai
+            else
+              prompt
+            end
+
+          # Venice wants strict message structure
+          formatted_messages = messages.map do |msg|
+            {
+              role: msg[:role].to_s,
+              content: msg[:content].to_s
+            }
+          end
 
           payload = default_options.merge(model_params).merge(messages: formatted_messages)
 
