@@ -31,7 +31,27 @@ module DiscourseAi
             model: llm_model.name,
             stream: true,
             n: 1,
-            user: "discourse"
+            user: "discourse",
+            venice_parameters: {
+              character_slug: "venice",
+              enable_web_search: "auto",
+              include_venice_system_prompt: true
+            },
+            stream_options: {
+              include_usage: true
+            },
+            parallel_tool_calls: false,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  age: { type: "number" }
+                },
+                required: ["name", "age"]
+              }
+            }
           }
         end
 
@@ -69,7 +89,6 @@ module DiscourseAi
               prompt
             end
 
-          # Venice wants strict message structure
           formatted_messages = messages.map do |msg|
             {
               role: msg[:role].to_s,
@@ -80,7 +99,17 @@ module DiscourseAi
           payload = default_options.merge(model_params).merge(messages: formatted_messages)
 
           if !xml_tools_enabled? && dialect.tools.present?
-            payload[:tools] = dialect.tools
+            payload[:tools] = dialect.tools.map do |tool|
+              {
+                function: {
+                  name: tool[:function][:name],
+                  description: tool[:function][:description] || "No description",
+                  parameters: tool[:function][:parameters] || {}
+                },
+                id: tool[:id] || "tool_#{SecureRandom.hex(4)}",
+                type: tool[:type] || "function"
+              }
+            end
 
             if dialect.tool_choice.present?
               payload[:tool_choice] =
@@ -90,7 +119,7 @@ module DiscourseAi
                   {
                     type: "function",
                     function: {
-                      name: dialect.tool_choice
+                      name: dialect.tool_choice.to_s
                     }
                   }
                 end
