@@ -28,7 +28,9 @@ module DiscourseAi
         end
 
         def default_options
-          {}
+          {
+            model: llm_model.name # ensure "model" is always present in request
+          }
         end
 
         def provider_id
@@ -58,22 +60,27 @@ module DiscourseAi
         end
 
         def prepare_payload(prompt, model_params, dialect)
+          # Use prompt.messages (raw content) instead of .to_openai, since Venice may not expect OpenAI-style
           formatted_messages =
-            prompt.is_a?(DiscourseAi::Completions::Prompt) ? prompt.to_openai : prompt
+            prompt.respond_to?(:messages) ? prompt.messages : prompt
 
           payload = default_options.merge(model_params).merge(messages: formatted_messages)
 
-          if !xml_tools_enabled?
-            if dialect.tools.present?
-              payload[:tools] = dialect.tools
-              if dialect.tool_choice.present?
-                payload[:tool_choice] = dialect.tool_choice == :none ? "none" : {
-                  type: "function",
-                  function: {
-                    name: dialect.tool_choice,
-                  },
-                }
-              end
+          if !xml_tools_enabled? && dialect.tools.present?
+            payload[:tools] = dialect.tools
+
+            if dialect.tool_choice.present?
+              payload[:tool_choice] =
+                if dialect.tool_choice == :none
+                  "none"
+                else
+                  {
+                    type: "function",
+                    function: {
+                      name: dialect.tool_choice
+                    }
+                  }
+                end
             end
           end
 
