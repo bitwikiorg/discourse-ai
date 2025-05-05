@@ -58,7 +58,7 @@ module DiscourseAi
         end
 
         def prepare_payload(prompt, model_params, dialect)
-          payload = default_options.merge(model_params).merge(messages: prompt)
+          payload = default_options.merge(model_params).merge(messages: prompt.to_openai)
 
           if !xml_tools_enabled?
             if dialect.tools.present?
