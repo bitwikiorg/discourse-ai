@@ -208,6 +208,7 @@ module DiscourseAi
             samba_nova
             mistral
             open_router
+            venice
           ]
           if !Rails.env.production?
             providers << "fake"
