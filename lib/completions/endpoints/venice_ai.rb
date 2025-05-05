@@ -93,7 +93,7 @@ module DiscourseAi
             {
               role: msg[:role].to_s,
               content: msg[:content].to_s
-            }
+            }.compact
           end
 
           payload = default_options.merge(model_params).merge(messages: formatted_messages)
@@ -102,13 +102,13 @@ module DiscourseAi
             payload[:tools] = dialect.tools.map do |tool|
               {
                 function: {
-                  name: tool[:function][:name],
-                  description: tool[:function][:description] || "No description",
-                  parameters: tool[:function][:parameters] || {}
+                  name: tool.dig(:function, :name).to_s,
+                  description: tool.dig(:function, :description).to_s,
+                  parameters: tool.dig(:function, :parameters) || {}
                 },
                 id: tool[:id] || "tool_#{SecureRandom.hex(4)}",
                 type: tool[:type] || "function"
-              }
+              }.compact
             end
 
             if dialect.tool_choice.present?
@@ -126,7 +126,7 @@ module DiscourseAi
             end
           end
 
-          payload
+          payload.compact
         end
 
         def prepare_request(payload)
@@ -135,7 +135,15 @@ module DiscourseAi
             "Authorization" => "Bearer #{llm_model.api_key}"
           }
 
-          Net::HTTP::Post.new(model_uri, headers).tap { |r| r.body = payload.to_json }
+          request = Net::HTTP::Post.new(model_uri, headers)
+          request.body = payload.to_json
+
+          # Optional debug output — comment this in production
+          if ENV["DISCOURSE_DEV"] == "1"
+            puts "[Venice Payload] #{JSON.pretty_generate(payload)}"
+          end
+
+          request
         end
 
         def decode(response_raw)
