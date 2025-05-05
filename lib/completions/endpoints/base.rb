@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "venice_ai"
-
 module DiscourseAi
   module Completions
     module Endpoints
