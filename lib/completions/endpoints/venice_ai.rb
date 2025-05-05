@@ -9,50 +9,11 @@ module DiscourseAi
         end
 
         def normalize_model_params(model_params)
-          model_params = model_params.dup
-
-          if max_tokens = model_params.delete(:max_tokens)
-            model_params[:max_completion_tokens] = max_tokens
-          end
-
-          if temp = model_params.delete(:temperature)
-            model_params[:max_temp] = temp
-          end
-
-          if model_params[:stop_sequences]
-            model_params[:stop] = model_params.delete(:stop_sequences)
-          end
-
-          model_params
+          model_params # No transformation; Venice expects exact fields
         end
 
         def default_options
-          {
-            model: llm_model.name,
-            stream: true,
-            n: 1,
-            user: "discourse",
-            venice_parameters: {
-              character_slug: "venice",
-              enable_web_search: "auto",
-              include_venice_system_prompt: true
-            },
-            stream_options: {
-              include_usage: true
-            },
-            parallel_tool_calls: false,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  age: { type: "number" }
-                },
-                required: ["name", "age"]
-              }
-            }
-          }
+          {} # No defaults, only send exactly what Venice expects
         end
 
         def provider_id
@@ -76,57 +37,68 @@ module DiscourseAi
         private
 
         def model_uri
-          api_endpoint = llm_model.url
-          api_endpoint += "/api/v1/chat/completions" unless api_endpoint.end_with?("/api/v1/chat/completions")
-          @uri ||= URI(api_endpoint)
+          @uri ||= URI.join(llm_model.url, "/api/v1/chat/completions")
         end
 
-        def prepare_payload(prompt, model_params, dialect)
-          messages =
-            if prompt.respond_to?(:to_openai)
-              prompt.to_openai
-            else
-              prompt
-            end
+        def prepare_payload(prompt, _model_params, _dialect)
+          messages = prompt.respond_to?(:messages) ? prompt.messages : prompt
 
-          formatted_messages = messages.map do |msg|
-            {
-              role: msg[:role].to_s,
-              content: msg[:content].to_s
-            }
-          end
-
-          payload = default_options.merge(model_params).merge(messages: formatted_messages)
-
-          if !xml_tools_enabled? && dialect.tools.present?
-            payload[:tools] = dialect.tools.map do |tool|
-              {
-                function: {
-                  name: tool.dig(:function, :name).to_s,
-                  description: tool.dig(:function, :description).to_s,
-                  parameters: tool.dig(:function, :parameters) || {}
+          {
+            frequency_penalty: 0,
+            max_completion_tokens: 123,
+            max_temp: 1.5,
+            max_tokens: 123,
+            messages: messages.map { |m| { content: m[:content].to_s, role: m[:role].to_s } },
+            min_p: 0.05,
+            min_temp: 0.1,
+            model: llm_model.name,
+            n: 1,
+            presence_penalty: 0,
+            repetition_penalty: 1.2,
+            seed: 42,
+            stop: "<string>",
+            stop_token_ids: [151643, 151645],
+            stream: true,
+            stream_options: { include_usage: true },
+            temperature: 0.7,
+            top_k: 40,
+            top_p: 0.9,
+            user: "discourse",
+            venice_parameters: {
+              character_slug: "venice",
+              enable_web_search: "auto",
+              include_venice_system_prompt: true
+            },
+            parallel_tool_calls: false,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                type: "object",
+                properties: {
+                  age: { type: "number" },
+                  name: { type: "string" }
                 },
-                id: tool[:id] || "tool_#{SecureRandom.hex(4)}",
-                type: tool[:type] || "function"
+                required: %w[name age]
               }
-            end
-
-            if dialect.tool_choice.present?
-              payload[:tool_choice] =
-                if dialect.tool_choice == :none
-                  "none"
-                else
-                  {
-                    type: "function",
-                    function: {
-                      name: dialect.tool_choice.to_s
-                    }
-                  }
-                end
-            end
-          end
-
-          deep_compact(payload)
+            },
+            tool_choice: {
+              type: "<string>",
+              function: {
+                name: "<string>"
+              }
+            },
+            tools: [
+              {
+                id: "<string>",
+                type: "<string>",
+                function: {
+                  name: "<string>",
+                  description: "<string>",
+                  parameters: {}
+                }
+              }
+            ]
+          }
         end
 
         def prepare_request(payload)
@@ -135,9 +107,9 @@ module DiscourseAi
             "Authorization" => "Bearer #{llm_model.api_key}"
           }
 
-          request = Net::HTTP::Post.new(model_uri, headers)
-          request.body = payload.to_json
-          request
+          Net::HTTP::Post.new(model_uri, headers).tap do |r|
+            r.body = JSON.generate(payload) # Clean serialization, avoid Rails `.to_json`
+          end
         end
 
         def decode(response_raw)
@@ -146,11 +118,9 @@ module DiscourseAi
 
         def decode_chunk(chunk)
           @decoder ||= JsonStreamDecoder.new
-          elements =
-            (@decoder << chunk)
-              .map { |parsed_json| processor.process_streamed_message(parsed_json) }
-              .flatten
-              .compact
+          elements = (@decoder << chunk).map do |parsed_json|
+            processor.process_streamed_message(parsed_json)
+          end.flatten.compact
 
           seen_tools = Set.new
           elements.select { |item| !item.is_a?(ToolCall) || seen_tools.add?(item) }
@@ -166,21 +136,6 @@ module DiscourseAi
 
         def processor
           @processor ||= OpenAiMessageProcessor.new(partial_tool_calls: partial_tool_calls)
-        end
-
-        # 🧼 Deeply remove nil values from all levels of the hash
-        def deep_compact(obj)
-          case obj
-          when Hash
-            obj.each_with_object({}) do |(k, v), h|
-              compacted = deep_compact(v)
-              h[k] = compacted unless compacted.nil?
-            end
-          when Array
-            obj.map { |e| deep_compact(e) }.compact
-          else
-            obj
-          end
         end
       end
     end
