@@ -69,36 +69,7 @@ module DiscourseAi
               enable_web_search: "auto",
               include_venice_system_prompt: true
             },
-            parallel_tool_calls: false,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                type: "object",
-                properties: {
-                  age: { type: "number" },
-                  name: { type: "string" }
-                },
-                required: %w[name age]
-              }
-            },
-            tool_choice: {
-              type: "<string>",
-              function: {
-                name: "<string>"
-              }
-            },
-            tools: [
-              {
-                id: "<string>",
-                type: "<string>",
-                function: {
-                  name: "<string>",
-                  description: "<string>",
-                  parameters: {}
-                }
-              }
-            ]
-          }
+            
         end
 
         def prepare_request(payload)
